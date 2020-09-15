@@ -30,8 +30,8 @@ import CustomInput from "components/CustomInput/CustomInput.js";
 // import SectionOpenedPool from "./SectionOpenedPool";
 import { useSnackbar } from 'notistack';
 //  hooks
-import { useWallet } from '../../home/redux/hooks';
-import { useFetchBalances, useFetchPoolBalances, useFetchApproval, useFetchDeposit, useFetchWithdraw } from '../redux/hooks';
+import { useConnectWallet } from '../../home/redux/hooks';
+import { useFetchBalances, useFetchPoolBalances, useFetchApproval, useFetchDeposit, useFetchWithdraw, useFetchContractApy } from '../redux/hooks';
 
 import sectionPoolsStyle from "../jss/sections/sectionPoolsStyle";
 import { reflect } from 'async';
@@ -40,15 +40,16 @@ const useStyles = makeStyles(sectionPoolsStyle);
 
 export default function SectionPools() {
   const { t, i18n } = useTranslation();
-  const { web3, address } = useWallet();
+  const { web3, address } = useConnectWallet();
   let { pools, fetchPoolBalances } = useFetchPoolBalances();
   const { tokens, fetchBalances } = useFetchBalances();
   const [ openedCardList, setOpenCardList ] = useState([0]);
   const classes = useStyles();
 
   const { fetchApproval, fetchApprovalPending } = useFetchApproval();
-  const { fetchDeposit, fetchDepositPending } = useFetchDeposit();
-  const { fetchWithdraw, fetchWithdrawPending } = useFetchWithdraw();
+  const { fetchDeposit, fetchDepositEth, fetchDepositPending } = useFetchDeposit();
+  const { fetchWithdraw, fetchWithdrawEth, fetchWithdrawPending } = useFetchWithdraw();
+  const { contractApy, fetchContractApy } = useFetchContractApy();
 
   const [ depositedBalance, setDepositedBalance ] = useState({});
   const [ withdrawAmount, setWithdrawAmount ] = useState({});
@@ -62,10 +63,11 @@ export default function SectionPools() {
     return byDecimals(sliderNum/100*Number(total), 0).toFormat(4);
   }
   
-  const changeDetailInputValue = (type,index,total,event) => {
+  const changeDetailInputValue = (type,index,total,tokenDecimals,event) => {
     let value = event.target.value;
     let reg = /[a-z]/i;
-    if(reg.test(value)){
+    let valueArr = value.split('.');
+    if(reg.test(value) || (valueArr.length==2 && valueArr[1].length > tokenDecimals) ){
         return;
     }
     let sliderNum = 0;
@@ -77,14 +79,14 @@ export default function SectionPools() {
         case 'depositedBalance':
             setDepositedBalance({
                 ...depositedBalance,
-                [index]: inputVal > total ? byDecimals(total,0).toFormat(4) :value,
+                [index]: inputVal > total ? byDecimals(total,0).toFormat(tokenDecimals) :value,
                 [`slider-${index}`]: sliderNum,
             });
             break;
         case 'withdrawAmount':
             setWithdrawAmount({
                 ...withdrawAmount,
-                [index]: inputVal > total ? byDecimals(total,0).toFormat(4) :value,
+                [index]: inputVal > total ? byDecimals(total,0).toFormat(tokenDecimals) :value,
                 [`slider-${index}`]: sliderNum,
             });
             break;
@@ -138,18 +140,33 @@ export default function SectionPools() {
         [`slider-${index}`]: 100,
       })
     }
-    fetchDeposit({
-      address,
-      web3,
-      isAll,
-      amount: new BigNumber(depositedBalance[index]).multipliedBy(new BigNumber(10).exponentiatedBy(pool.tokenDecimals)).toString(10),
-      contractAddress: pool.earnContractAddress,
-      index
-    }).then(
-      () => enqueueSnackbar(`Deposit success`, {variant: 'success'})
-    ).catch(
-      error => enqueueSnackbar(`Deposit error: ${error}`, {variant: 'error'})
-    )
+    let amountValue =  depositedBalance[index]? depositedBalance[index].replace(',',''): depositedBalance[index];
+    if (!pool.tokenAddress) {// 如果是eth
+      fetchDepositEth({
+        address,
+        web3,
+        amount: new BigNumber(amountValue).multipliedBy(new BigNumber(10).exponentiatedBy(pool.tokenDecimals)).toString(10),
+        contractAddress: pool.earnContractAddress,
+        index
+      }).then(
+        () => enqueueSnackbar(`Deposit success`, {variant: 'success'})
+      ).catch(
+        error => enqueueSnackbar(`Deposit error: ${error}`, {variant: 'error'})
+      )
+    } else {
+      fetchDeposit({
+        address,
+        web3,
+        isAll,
+        amount: new BigNumber(amountValue).multipliedBy(new BigNumber(10).exponentiatedBy(pool.tokenDecimals)).toString(10),
+        contractAddress: pool.earnContractAddress,
+        index
+      }).then(
+        () => enqueueSnackbar(`Deposit success`, {variant: 'success'})
+      ).catch(
+        error => enqueueSnackbar(`Deposit error: ${error}`, {variant: 'error'})
+      )
+    }
   }
 
   const onWithdraw = (pool, index, isAll, singleDepositedBalance, event) => {
@@ -157,23 +174,40 @@ export default function SectionPools() {
     // console.log(isAll)
     if (isAll) {
       setWithdrawAmount({
-        ...depositedBalance,
+        ...withdrawAmount,
         [index]: forMat(singleDepositedBalance),
         [`slider-${index}`]: 100,
       })
     }
-    fetchWithdraw({
-      address,
-      web3,
-      isAll,
-      amount: new BigNumber(withdrawAmount[index]).multipliedBy(new BigNumber(10).exponentiatedBy(pool.tokenDecimals)).toString(10),
-      contractAddress: pool.earnContractAddress,
-      index
-    }).then(
-      () => enqueueSnackbar(`Withdraw success`, {variant: 'success'})
-    ).catch(
-      error => enqueueSnackbar(`Withdraw error: ${error}`, {variant: 'error'})
-    )
+    let amountValue =  withdrawAmount[index]? withdrawAmount[index].replace(',',''): withdrawAmount[index];
+    if (!pool.tokenAddress) {// 如果是eth
+      fetchWithdrawEth({
+        address,
+        web3,
+        isAll,
+        amount: new BigNumber(amountValue).multipliedBy(new BigNumber(10).exponentiatedBy(pool.tokenDecimals)).toString(10),
+        contractAddress: pool.earnContractAddress,
+        index
+      }).then(
+        () => enqueueSnackbar(`Withdraw success`, {variant: 'success'})
+      ).catch(
+        error => enqueueSnackbar(`Withdraw error: ${error}`, {variant: 'error'})
+      )
+    } else {
+      fetchWithdraw({
+        address,
+        web3,
+        isAll,
+        amount: new BigNumber(amountValue).multipliedBy(new BigNumber(10).exponentiatedBy(pool.tokenDecimals)).toString(10),
+        contractAddress: pool.earnContractAddress,
+        index
+      }).then(
+        () => enqueueSnackbar(`Withdraw success`, {variant: 'success'})
+      ).catch(
+        error => enqueueSnackbar(`Withdraw error: ${error}`, {variant: 'error'})
+      )
+    }
+    
   }
 
   const openCard = id => {
@@ -199,6 +233,10 @@ export default function SectionPools() {
       return () => clearInterval(id);
     }
   }, [address, web3, fetchBalances, fetchPoolBalances]);
+
+  useEffect(() => {
+    fetchContractApy();
+  }, [pools, fetchContractApy]);
 
   const forMat = number => {
     return new BigNumber(
@@ -254,7 +292,7 @@ export default function SectionPools() {
         {pools.map((pool, index) => {
           let balanceSingle = byDecimals(tokens[pool.token].tokenBalance, pool.tokenDecimals);
           let singleDepositedBalance = byDecimals(tokens[pool.earnedToken].tokenBalance, pool.tokenDecimals);
-          let depositedApy = pool.defaultApy ? pool.defaultApy : new BigNumber(pool.pricePerFullShare).minus(new BigNumber(pool.pastPricePerFullShare)).multipliedBy(new BigNumber(100)).toFormat(4);
+          let depositedApy = contractApy[pool.id] || 0;
           return (
             <Accordion
               key={index}
@@ -307,7 +345,7 @@ export default function SectionPools() {
                             </GridItem>
                             <GridItem sm={3}></GridItem>
                             <GridItem sm={4} container direction='column' justify='flex-start' alignItems="flex-start">
-                                    <div className={classes.iconContainerMainTitle}>{depositedApy}%</div>
+                                    <div className={classes.iconContainerMainTitle}>{depositedApy}</div>
                                     <div className={classes.iconContainerSubTitle}>{t('Vault-ListAPY')}</div>
                             </GridItem>
                         </GridItem>
@@ -316,7 +354,7 @@ export default function SectionPools() {
                             <GridItem xs={5} container justify='center' alignItems="flex-start">
                                     <GridItem xs={4} container direction='column' justify='center' alignItems="flex-start"></GridItem>
                                     <GridItem xs={8} container direction='column' justify='center' alignItems="flex-start">
-                                        <div className={classes.iconContainerMainTitle}>{depositedApy}%</div>
+                                        <div className={classes.iconContainerMainTitle}>{depositedApy}</div>
                                         <div className={classes.iconContainerSubTitle}>{t('Vault-ListAPY')}</div>
                                     </GridItem>
                             </GridItem>
@@ -364,9 +402,9 @@ export default function SectionPools() {
                             classes={{
                                 root: classes.showDetail
                             }} 
-                            value={depositedBalance[index]!=undefined ? depositedBalance[index] : '0.0000'}
+                            value={depositedBalance[index]!=undefined ? depositedBalance[index] :'0'}
                             variant="outlined"
-                            onChange={changeDetailInputValue.bind(this,'depositedBalance',index,balanceSingle.toNumber())}
+                            onChange={changeDetailInputValue.bind(this,'depositedBalance',index,balanceSingle.toNumber(),pool.tokenDecimals)}
                             fullWidth 
                             />
                     </FormControl>
@@ -388,13 +426,14 @@ export default function SectionPools() {
                     
                         <div>
                             {
-                                depositedBalance[index]>pool.allowance ? (
+                                pool.allowance === 0 ? (
                                     <div className={classes.showDetailButtonCon}>
                                         <Button 
                                             style={{
                                                 backgroundColor:'#353848',
                                                 color:'#FF2D82',
-                                                boxShadow:'0 2px 2px 0 rgba(53, 56, 72, 0.14), 0 3px 1px -2px rgba(53, 56, 72, 0.2), 0 1px 5px 0 rgba(53, 56, 72, 0.12)'
+                                                boxShadow:'0 2px 2px 0 rgba(53, 56, 72, 0.14), 0 3px 1px -2px rgba(53, 56, 72, 0.2), 0 1px 5px 0 rgba(53, 56, 72, 0.12)',
+                                                fontWeight: "bold"
                                             }}
                                             color="primary"
                                             onClick={onApproval.bind(this, pool, index)}
@@ -423,7 +462,7 @@ export default function SectionPools() {
                                             onClick={onDeposit.bind(this, pool, index, false, balanceSingle)}
                                             >{t('Vault-DepositButton')}
                                         </Button>
-                                        <Button 
+                                        {Boolean(pool.tokenAddress) && <Button 
                                             style={{
                                                 width: '180px',
                                                 margin: '12px 0',
@@ -440,7 +479,7 @@ export default function SectionPools() {
                                             }
                                             onClick={onDeposit.bind(this, pool, index, true, balanceSingle)}
                                             >{t('Vault-DepositButtonAll')}
-                                        </Button>
+                                        </Button>}
                                     </div>
                                 )
                             }
@@ -456,8 +495,8 @@ export default function SectionPools() {
                                 classes={{
                                     root: classes.showDetail
                                 }} 
-                                value={withdrawAmount[index]!=undefined ? withdrawAmount[index] : '0.0000'}
-                                onChange={changeDetailInputValue.bind(this,'withdrawAmount',index,singleDepositedBalance.toNumber())}
+                                value={withdrawAmount[index]!=undefined ? withdrawAmount[index] : '0'}
+                                onChange={changeDetailInputValue.bind(this,'withdrawAmount',index,singleDepositedBalance.toNumber(),pool.tokenDecimals)}
                                 variant="outlined"
                                 fullWidth 
                                 />
